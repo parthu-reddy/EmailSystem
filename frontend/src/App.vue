@@ -55,7 +55,10 @@
             @click="emailStore.selectEmail(email)"
           >
             <div class="sender">{{ email.from }}</div>
-            <div class="subject">{{ email.subject || 'No Subject' }}</div>
+            <div class="subject">
+              {{ email.subject || 'No Subject' }}
+              <span v-if="email.attachments && email.attachments.length > 0" class="attachment-indicator">📎</span>
+            </div>
             <div class="preview">{{ email.body }}</div>
             <div class="time">{{ email.timestamp }}</div>
           </div>
@@ -86,6 +89,31 @@
             <div class="email-body">
               {{ emailStore.selectedEmail.body }}
             </div>
+
+            <!-- Attachments Section -->
+            <div v-if="emailStore.selectedEmail.attachments && emailStore.selectedEmail.attachments.length > 0" class="attachments-section">
+              <div class="attachments-header">
+                <span class="attachments-icon">📎</span>
+                <span>{{ emailStore.selectedEmail.attachments.length }} Attachment{{ emailStore.selectedEmail.attachments.length > 1 ? 's' : '' }}</span>
+              </div>
+              <div class="attachments-grid">
+                <a
+                  v-for="att in emailStore.selectedEmail.attachments"
+                  :key="att.filename"
+                  :href="att.downloadUrl"
+                  target="_blank"
+                  class="attachment-card"
+                  :title="'Download ' + att.filename"
+                >
+                  <div class="attachment-icon">{{ getFileIcon(att.contentType, att.filename) }}</div>
+                  <div class="attachment-info">
+                    <div class="attachment-name">{{ att.filename }}</div>
+                    <div class="attachment-meta">{{ att.displaySize }} · {{ getFileTypeLabel(att.contentType) }}</div>
+                  </div>
+                  <div class="download-icon">⬇️</div>
+                </a>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -102,6 +130,39 @@ const emailStore = useEmailStore()
 onMounted(() => {
   emailStore.connectWebSocket()
 })
+
+function getFileIcon(contentType, filename) {
+  if (!contentType) return '📄'
+  const ct = contentType.toLowerCase()
+  if (ct.includes('image')) return '🖼️'
+  if (ct.includes('pdf')) return '📕'
+  if (ct.includes('zip') || ct.includes('compressed') || ct.includes('archive')) return '🗜️'
+  if (ct.includes('video')) return '🎬'
+  if (ct.includes('audio') || ct.includes('mp3')) return '🎵'
+  if (ct.includes('spreadsheet') || ct.includes('excel') || ct.includes('csv')) return '📊'
+  if (ct.includes('presentation') || ct.includes('powerpoint')) return '📽️'
+  if (ct.includes('word') || ct.includes('document')) return '📝'
+  if (ct.includes('text')) return '📄'
+  if (ct.includes('json') || ct.includes('xml')) return '🔧'
+  return '📎'
+}
+
+function getFileTypeLabel(contentType) {
+  if (!contentType) return 'File'
+  const ct = contentType.toLowerCase()
+  if (ct.includes('pdf')) return 'PDF'
+  if (ct.includes('png')) return 'PNG'
+  if (ct.includes('jpeg') || ct.includes('jpg')) return 'JPEG'
+  if (ct.includes('gif')) return 'GIF'
+  if (ct.includes('zip')) return 'ZIP'
+  if (ct.includes('csv')) return 'CSV'
+  if (ct.includes('json')) return 'JSON'
+  if (ct.includes('plain')) return 'Text'
+  if (ct.includes('html')) return 'HTML'
+  // Extract subtype from MIME e.g. "application/pdf" → "pdf"
+  const parts = ct.split('/')
+  return parts.length > 1 ? parts[1].toUpperCase().substring(0, 8) : 'File'
+}
 </script>
 
 <style>
@@ -453,5 +514,105 @@ body {
 
 .glass-panel p {
   color: var(--text-muted);
+}
+
+/* ===== Attachment Styles ===== */
+.attachment-indicator {
+  font-size: 12px;
+  margin-left: 6px;
+  opacity: 0.7;
+}
+
+.attachments-section {
+  border-top: 1px solid var(--border);
+  padding: 24px 32px;
+  background: rgba(255, 255, 255, 0.015);
+}
+
+.attachments-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin-bottom: 16px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.attachments-icon {
+  font-size: 16px;
+}
+
+.attachments-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.attachment-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 18px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  text-decoration: none;
+  color: var(--text-main);
+  transition: all 0.25s ease;
+  cursor: pointer;
+  min-width: 220px;
+  max-width: 320px;
+}
+
+.attachment-card:hover {
+  background: rgba(99, 102, 241, 0.12);
+  border-color: rgba(99, 102, 241, 0.3);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+}
+
+.attachment-icon {
+  font-size: 28px;
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 10px;
+}
+
+.attachment-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.attachment-name {
+  font-size: 14px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.attachment-meta {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.download-icon {
+  font-size: 16px;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  flex-shrink: 0;
+}
+
+.attachment-card:hover .download-icon {
+  opacity: 1;
 }
 </style>
