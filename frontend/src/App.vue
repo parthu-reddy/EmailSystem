@@ -100,8 +100,8 @@
                 <a
                   v-for="att in emailStore.selectedEmail.attachments"
                   :key="att.filename"
-                  :href="att.downloadUrl"
-                  target="_blank"
+                  href="#"
+                  @click.prevent="downloadAttachment(att)"
                   class="attachment-card"
                   :title="'Download ' + att.filename"
                 >
@@ -130,6 +130,26 @@ const emailStore = useEmailStore()
 onMounted(() => {
   emailStore.connectWebSocket()
 })
+
+async function downloadAttachment(att) {
+  try {
+    const response = await fetch(att.downloadUrl);
+    if (!response.ok) throw new Error('Network response was not ok');
+    const blob = await response.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.style.display = 'none';
+    a.href = url;
+    a.download = att.filename;
+    document.body.appendChild(a);
+    a.click();
+    window.URL.revokeObjectURL(url);
+    document.body.removeChild(a);
+  } catch (error) {
+    console.error('Failed to download attachment:', error);
+    alert('Failed to download attachment. Please try again.');
+  }
+}
 
 function getFileIcon(contentType, filename) {
   if (!contentType) return '📄'
