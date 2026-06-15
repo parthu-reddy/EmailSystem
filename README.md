@@ -48,7 +48,7 @@ graph LR
     G -. "cluster coordination" .-> C
     C -- "Kafka Consumer<br/>@KafkaListener" --> D
     D -- "WebSocket/STOMP<br/>/topic/emails" --> H
-    D -. "future: persist" .-> E
+    D -- "persist" --> E
     D -. "future: index" .-> F
 ```
 
@@ -59,8 +59,10 @@ graph LR
 | 1 | SMTP (TCP:25) | External Mail Client | `IncomingSmtpListener` | Raw MIME envelope received |
 | 2 | Internal | `SmtpMessageHandler` | `KafkaTemplate` | JSON payload published to `incoming-emails` topic |
 | 3 | Kafka | `incoming-emails` topic | `KafkaConsumerService` | Message consumed by consumer group |
-| 4 | WebSocket/STOMP | `SimpMessagingTemplate` | Vue.js Client | Real-time push to `/topic/emails` |
-| 5 | Reactive UI | Pinia Store | `App.vue` | Email rendered in inbox list |
+| 4 | CQL | `KafkaConsumerService` | Cassandra Database | Parsed email saved to `emails` table permanently |
+| 5 | WebSocket/STOMP | `SimpMessagingTemplate` | Vue.js Client | Real-time push to `/topic/emails` |
+| 6 | HTTP | Vue.js Client | `EmailController` | Historical emails fetched via `GET /api/emails` on load |
+| 7 | Reactive UI | Pinia Store | `App.vue` | Email rendered in inbox list |
 
 ---
 
@@ -75,6 +77,7 @@ sequenceDiagram
     participant Handler as 🔧 SmtpMessageHandler
     participant Kafka as 🔀 Kafka Broker<br/>topic: incoming-emails
     participant Consumer as 📥 KafkaConsumerService
+    participant Cassandra as 🗃️ Cassandra DB
     participant WS as 🌐 WebSocket<br/>STOMP Broker
     participant Store as 🗃️ Pinia emailStore
     participant UI as 💻 App.vue
@@ -87,6 +90,7 @@ sequenceDiagram
     Handler->>Kafka: kafkaTemplate.send("incoming-emails", jsonPayload)
     Note over Kafka: {"from":"alice@example.com",<br/>"to":"user@example.com",<br/>"body":"Hello, world!"}
     Kafka-->>Consumer: @KafkaListener(topics="incoming-emails")
+    Consumer->>Cassandra: save(new EmailEntity(...))
     Consumer->>WS: messagingTemplate.convertAndSend("/topic/emails", message)
     WS-->>Store: stompClient.subscribe("/topic/emails", callback)
     Store->>Store: JSON.parse → assign id, timestamp, read=false
@@ -130,20 +134,29 @@ kafkaTemplate.send("incoming-emails", jsonPayload);
 
 The `KafkaTemplate<String, String>` is auto-configured by Spring Boot using the `spring.kafka.bootstrap-servers` property.
 
-#### Step 3 — Kafka Consumption
+#### Step 3 — Kafka Consumption & Persistence
 
-`KafkaConsumerService` uses Spring Kafka's `@KafkaListener` annotation to subscribe to the `incoming-emails` topic as part of the `email-consumer-group` consumer group:
+`KafkaConsumerService` uses Spring Kafka's `@KafkaListener` annotation to subscribe to the `incoming-emails` topic as part of the `email-consumer-group` consumer group. 
+
+Upon consuming the message, it performs two actions:
+1. **Persistence:** It parses the JSON, creates an `EmailEntity`, and saves it to the Cassandra database using `EmailRepository`.
+2. **Real-time Push:** It immediately forwards the message to all connected WebSocket clients via Spring's `SimpMessagingTemplate`.
 
 ```java
 @KafkaListener(topics = "incoming-emails", groupId = "email-consumer-group")
 public void consume(String message) {
+    // 1. Persist to Database
+    EmailEntity emailEntity = parseAndCreateEntity(message);
+    emailRepository.save(emailEntity);
+
+    // 2. Broadcast via WebSocket
     messagingTemplate.convertAndSend("/topic/emails", message);
 }
 ```
 
 #### Step 4 — WebSocket Push to Browser
 
-The consumed message is immediately forwarded to all connected WebSocket clients via Spring's `SimpMessagingTemplate`. The STOMP destination `/topic/emails` is configured in `WebSocketConfig`:
+The STOMP destination `/topic/emails` is configured in `WebSocketConfig`:
 
 ```java
 config.enableSimpleBroker("/topic");          // Subscribe prefix
@@ -151,9 +164,11 @@ config.setApplicationDestinationPrefixes("/app");  // Send prefix
 registry.addEndpoint("/ws-email").withSockJS();    // SockJS fallback
 ```
 
-#### Step 5 — Frontend Reactive Rendering
+#### Step 5 — Frontend Initialization & Reactive Rendering
 
-The Vue.js Pinia store (`emailStore.js`) subscribes to the STOMP topic on mount:
+When the Vue application loads, the `App.vue` component's `onMounted` hook fires:
+1. **Fetch History:** It calls `GET /api/emails` to fetch all past historical emails from Cassandra, populating the inbox instantly.
+2. **Connect WebSocket:** The Pinia store (`emailStore.js`) connects to the STOMP topic.
 
 ```javascript
 this.stompClient.subscribe('/topic/emails', (message) => {
@@ -190,13 +205,19 @@ Vue 3's **Proxy-based reactivity** detects the array mutation, triggering a re-r
 backend/src/main/java/com/emailservice/backend/
 ├── BackendApplication.java              ← Spring Boot entry point
 ├── config/
+│   ├── CassandraConfig.java             ← Cassandra keyspace & table schema setup
 │   └── WebSocketConfig.java             ← STOMP/SockJS endpoint configuration
+├── controller/
+│   └── EmailController.java             ← REST API (GET /api/emails)
 ├── kafka/
-│   └── KafkaConsumerService.java        ← Kafka → WebSocket bridge
-└── smtp/
-    ├── IncomingSmtpListener.java        ← Starts/stops SubEthaSMTP server
-    ├── SmtpMessageHandlerFactory.java   ← Factory: creates handler per SMTP session
-    └── SmtpMessageHandler.java          ← Parses SMTP envelope → publishes to Kafka
+│   └── KafkaConsumerService.java        ← Kafka → Cassandra → WebSocket bridge
+├── smtp/
+│   ├── IncomingSmtpListener.java        ← Starts/stops SubEthaSMTP server
+│   ├── SmtpMessageHandlerFactory.java   ← Factory: creates handler per SMTP session
+│   └── SmtpMessageHandler.java          ← Parses SMTP envelope → publishes to Kafka
+└── storage/
+    ├── EmailEntity.java                 ← Cassandra table mapping (@Table)
+    └── EmailRepository.java             ← Spring Data Cassandra repository
 ```
 
 #### `BackendApplication.java`
@@ -410,7 +431,7 @@ Then open **http://localhost:8000** in your browser — the email appears in rea
 | Service | URL |
 |---|---|
 | Frontend UI | http://localhost:8000 |
-| Backend REST API | http://localhost:8080 |
+| Backend REST API | http://localhost:8080/api/emails |
 | WebSocket Endpoint | ws://localhost:8080/ws-email |
 | SMTP Server | localhost:2525 |
 | Kafka Broker | localhost:9092 |
