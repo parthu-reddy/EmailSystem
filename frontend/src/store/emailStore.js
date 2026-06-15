@@ -68,6 +68,40 @@ export const useEmailStore = defineStore('emails', {
       this.stompClient.activate()
     },
     
+    async fetchHistoricalEmails() {
+      try {
+        const response = await fetch(`${BACKEND_URL}/api/emails`)
+        if (response.ok) {
+          const historicalData = await response.json()
+          
+          // Map backend entities to frontend structure
+          this.emails = historicalData.map(dbEmail => {
+            const parsedAttachments = dbEmail.attachmentsJson && dbEmail.attachmentsJson !== 'null' 
+              ? JSON.parse(dbEmail.attachmentsJson) 
+              : []
+            
+            return {
+              id: dbEmail.id,
+              from: dbEmail.sender,
+              to: dbEmail.recipient,
+              subject: dbEmail.subject,
+              body: dbEmail.body,
+              timestamp: dbEmail.timestamp,
+              read: true, // Mark historical emails as read by default
+              attachments: parsedAttachments.map(att => ({
+                ...att,
+                downloadUrl: `${BACKEND_URL}/api/attachments/${dbEmail.id}/${encodeURIComponent(att.filename)}`,
+                displaySize: formatFileSize(att.size)
+              }))
+            }
+          })
+          console.log(`✅ Loaded ${this.emails.length} historical emails from Cassandra`)
+        }
+      } catch (error) {
+        console.error('❌ Failed to fetch historical emails:', error)
+      }
+    },
+    
     selectEmail(email) {
       this.selectedEmail = email
       email.read = true

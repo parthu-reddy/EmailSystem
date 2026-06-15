@@ -127,7 +127,8 @@ import { useEmailStore } from './store/emailStore'
 
 const emailStore = useEmailStore()
 
-onMounted(() => {
+onMounted(async () => {
+  await emailStore.fetchHistoricalEmails()
   emailStore.connectWebSocket()
 })
 

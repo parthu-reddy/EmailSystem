@@ -13,3 +13,9 @@ spring:
     port: 9042
     local-datacenter: datacenter1
     keyspace-name: email_service
+    schema-action: CREATE_IF_NOT_EXISTS
+    request:
+      timeout: 10s
+    connection:
+      connect-timeout: 10s
+      init-query-timeout: 10s
